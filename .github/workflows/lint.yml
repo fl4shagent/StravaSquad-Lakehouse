@@ -1,0 +1,38 @@
+name: Notebook Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'notebooks/**'
+      - 'tests/**'
+      - 'lib/**'
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linters
+        run: pip install flake8 pyflakes
+
+      - name: Lint notebooks and library
+        run: |
+          # Strip Databricks magic commands before linting
+          for f in notebooks/*.py tests/*.py; do
+            grep -v '^# MAGIC' "$f" | grep -v '^# COMMAND' > "/tmp/$(basename $f)"
+            flake8 "/tmp/$(basename $f)" --max-line-length=120 --ignore=E501,W503,E402 || true
+          done
+          flake8 lib/ --max-line-length=120 --ignore=E501,W503
+
+      - name: Check imports resolve
+        run: |
+          pip install numpy scipy
+          python -c "from lib.prediction_formulas import riegel, compute_vdot, vdot_time, elevation_adjusted_riegel; print('OK: all formula imports resolve')"
