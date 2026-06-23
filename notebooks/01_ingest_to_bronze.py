@@ -13,7 +13,7 @@
 
 # COMMAND ----------
 
-S3_RAW_PATH = "s3://stravasquad-lakehouse/raw"
+S3_RAW_PATH = "s3://stravasquad-lakehouse-759869090470-ap-southeast-2-an/raw"
 CATALOG = "stravasquad"
 BRONZE_SCHEMA = "bronze"
 
