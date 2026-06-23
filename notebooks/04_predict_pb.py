@@ -4,32 +4,20 @@
 # MAGIC
 # MAGIC Reuses the same Riegel/VDOT/elevation-adjusted formulas from the SQL Server
 # MAGIC version, but reads from silver Delta tables and writes to gold Delta tables.
-# MAGIC
-# MAGIC Computation is done in pandas (collected to driver) since the data is small
-# MAGIC (~5K RunBest rows, ~1.5K Activities). The formulas are pure NumPy/SciPy.
-
-# COMMAND ----------
-
-CATALOG = "stravasquad"
 
 # COMMAND ----------
 
 import datetime as dt
 import numpy as np
 import pandas as pd
+from scipy.optimize import brentq
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Load prediction formulas
+# MAGIC ## Prediction Formulas
 
 # COMMAND ----------
-
-# Formulas are in lib/prediction_formulas.py in the repo.
-# In Databricks, add the repo to the workspace and import, or inline them:
-# For portability, we inline the core functions here.
-
-from scipy.optimize import brentq
 
 ELEVATION_FACTOR = 2.0
 
@@ -65,7 +53,7 @@ def elev_riegel(t1, d1, src_elev, d2, tgt_elev):
 
 # COMMAND ----------
 
-pdf_best = spark.table(f"{CATALOG}.silver.runbest").toPandas()
+pdf_best = spark.table("silver.runbest").toPandas()
 pdf_best["start_date"] = pd.to_datetime(pdf_best["start_date"])
 
 today = dt.date.today()
@@ -92,7 +80,7 @@ for (aid, dist), grp in pdf_best.groupby(["athlete_id", "name"]):
 
 df_pb = spark.createDataFrame(pd.DataFrame(pb_rows))
 df_pb.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.gold.pb_prediction")
+    .saveAsTable("gold.pb_prediction")
 
 print(f"gold.pb_prediction: {df_pb.count()} rows")
 
@@ -132,7 +120,9 @@ TARGET_RACES = [
     },
 ]
 
-pdf_act = spark.table(f"{CATALOG}.silver.activities").toPandas()
+# COMMAND ----------
+
+pdf_act = spark.table("silver.activities").toPandas()
 
 pdf_merged = pdf_best.merge(
     pdf_act[["activity_id", "distance_km", "elev_gain_m"]].rename(
@@ -193,6 +183,17 @@ for race in TARGET_RACES:
 
 df_fc = spark.createDataFrame(pd.DataFrame(fc_rows))
 df_fc.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.gold.race_forecast")
+    .saveAsTable("gold.race_forecast")
 
 print(f"gold.race_forecast: {df_fc.count()} rows")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Summary
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT 'pb_prediction' AS tbl, COUNT(*) AS rows FROM gold.pb_prediction
+# MAGIC UNION ALL SELECT 'race_forecast', COUNT(*) FROM gold.race_forecast;

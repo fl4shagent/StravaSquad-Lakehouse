@@ -9,7 +9,8 @@
 
 # COMMAND ----------
 
-CATALOG = "stravasquad"
+# MAGIC %sql
+# MAGIC CREATE SCHEMA IF NOT EXISTS gold;
 
 # COMMAND ----------
 
@@ -24,7 +25,7 @@ from pyspark.sql.types import StructType, StructField, IntegerType, StringType, 
 
 # COMMAND ----------
 
-date_bounds = spark.table(f"{CATALOG}.silver.activities").select(
+date_bounds = spark.table("silver.activities").select(
     F.date_sub(F.min("date"), 7).alias("min_date"),
     F.date_add(F.max("date"), 7).alias("max_date"),
 ).first()
@@ -42,21 +43,18 @@ df_dim_date = df_dates.select(
     F.year("date").alias("iso_year"),
     F.weekofyear("date").alias("iso_week"),
     F.date_format("date", "EEEE").alias("day_name"),
-    # Mon=1..Sun=7 (ISO standard)
     F.dayofweek("date").alias("day_of_week_spark"),
-    # week_start_date (Monday of this date's week)
     F.date_trunc("week", "date").cast("date").alias("week_start_date"),
 ).withColumn(
-    # Spark dayofweek: Sun=1..Sat=7 → convert to Mon=1..Sun=7
     "day_of_week",
     F.when(F.col("day_of_week_spark") == 1, 7)
      .otherwise(F.col("day_of_week_spark") - 1)
 ).withColumn(
     "week_relative_to_today",
-    F.datediff(
+    (F.datediff(
         F.date_trunc("week", F.current_date()),
         F.col("week_start_date")
-    ).cast("int") / 7
+    ) / 7).cast("int")
 ).withColumn(
     "days_ago",
     F.datediff(F.current_date(), F.col("date")).cast("int")
@@ -65,7 +63,7 @@ df_dim_date = df_dates.select(
 df_dim_date.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.gold.dim_date")
+    .saveAsTable("gold.dim_date")
 
 print(f"gold.dim_date: {df_dim_date.count()} rows ({date_bounds.min_date} to {date_bounds.max_date})")
 
@@ -103,7 +101,7 @@ df_dist = spark.createDataFrame(distance_data, schema)
 df_dist.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.gold.dim_distance_label")
+    .saveAsTable("gold.dim_distance_label")
 
 print(f"gold.dim_distance_label: {df_dist.count()} rows")
 
@@ -114,11 +112,9 @@ print(f"gold.dim_distance_label: {df_dist.count()} rows")
 
 # COMMAND ----------
 
-w = Window.partitionBy("rs.activity_id").orderBy("rs.time_s")
-
 df_first_point = (
-    spark.table(f"{CATALOG}.silver.runstream").alias("rs")
-    .filter("rs.lat IS NOT NULL AND rs.lon IS NOT NULL")
+    spark.table("silver.runstream")
+    .filter("lat IS NOT NULL AND lon IS NOT NULL")
     .withColumn("rn", F.row_number().over(
         Window.partitionBy("activity_id").orderBy("time_s")
     ))
@@ -127,7 +123,7 @@ df_first_point = (
 )
 
 df_gold_loc = (
-    spark.table(f"{CATALOG}.silver.activities").alias("a")
+    spark.table("silver.activities").alias("a")
     .join(df_first_point.alias("fp"), "activity_id", "inner")
     .select(
         "a.activity_id", "a.athlete_id", "a.athlete_name",
@@ -139,7 +135,7 @@ df_gold_loc = (
 df_gold_loc.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.gold.gold_activity_start_location")
+    .saveAsTable("gold.gold_activity_start_location")
 
 print(f"gold.gold_activity_start_location: {df_gold_loc.count()} rows")
 
@@ -151,5 +147,5 @@ print(f"gold.gold_activity_start_location: {df_gold_loc.count()} rows")
 # COMMAND ----------
 
 for table in ["dim_date", "dim_distance_label", "gold_activity_start_location"]:
-    count = spark.table(f"{CATALOG}.gold.{table}").count()
+    count = spark.table(f"gold.{table}").count()
     print(f"  gold.{table}: {count:,} rows")

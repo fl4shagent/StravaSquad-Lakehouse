@@ -11,7 +11,8 @@
 
 # COMMAND ----------
 
-CATALOG = "stravasquad"
+# MAGIC %sql
+# MAGIC CREATE SCHEMA IF NOT EXISTS silver;
 
 # COMMAND ----------
 
@@ -26,19 +27,19 @@ from delta.tables import DeltaTable
 
 # COMMAND ----------
 
-df = spark.table(f"{CATALOG}.bronze.runstream")
+df = spark.table("bronze.runstream")
 
-w = Window.partitionBy("activity_id", "time_s").orderBy(F.col("ingested_at").desc())
+w = Window.partitionBy("activity_id", "time_s").orderBy(F.lit(1))
 df_silver = (
     df.withColumn("rn", F.row_number().over(w))
     .filter("rn = 1")
-    .drop("rn", "ingested_at")
+    .drop("rn")
 )
 
 df_silver.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.silver.runstream")
+    .saveAsTable("silver.runstream")
 
 print(f"silver.runstream: {df_silver.count():,} rows (bronze had {df.count():,})")
 
@@ -49,14 +50,14 @@ print(f"silver.runstream: {df_silver.count():,} rows (bronze had {df.count():,})
 
 # COMMAND ----------
 
-df = spark.table(f"{CATALOG}.bronze.runbest")
-df_silver = df.drop("start_index", "end_index", "ingested_at") \
-              .dropDuplicates(["id"])
+df = spark.table("bronze.runbest")
+drop_cols = [c for c in ["start_index", "end_index"] if c in df.columns]
+df_silver = df.drop(*drop_cols).dropDuplicates(["id"])
 
 df_silver.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.silver.runbest")
+    .saveAsTable("silver.runbest")
 
 print(f"silver.runbest: {df_silver.count():,} rows")
 
@@ -67,15 +68,14 @@ print(f"silver.runbest: {df_silver.count():,} rows")
 
 # COMMAND ----------
 
-df = spark.table(f"{CATALOG}.bronze.runsegment")
-drop_cols = ["device_watts", "hidden", "visibility", "kom_rank", "ingested_at"]
-df_silver = df.drop(*[c for c in drop_cols if c in df.columns]) \
-              .dropDuplicates(["id"])
+df = spark.table("bronze.runsegment")
+drop_cols = [c for c in ["device_watts", "hidden", "visibility", "kom_rank"] if c in df.columns]
+df_silver = df.drop(*drop_cols).dropDuplicates(["id"])
 
 df_silver.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.silver.runsegment")
+    .saveAsTable("silver.runsegment")
 
 print(f"silver.runsegment: {df_silver.count():,} rows")
 
@@ -86,13 +86,13 @@ print(f"silver.runsegment: {df_silver.count():,} rows")
 
 # COMMAND ----------
 
-df = spark.table(f"{CATALOG}.bronze.runsplitkilometer")
-df_silver = df.drop("ingested_at").dropDuplicates(["activity_id", "segment_number"])
+df = spark.table("bronze.runsplitkilometer")
+df_silver = df.dropDuplicates(["activity_id", "segment_number"])
 
 df_silver.write.format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG}.silver.runsplitkilometer")
+    .saveAsTable("silver.runsplitkilometer")
 
 print(f"silver.runsplitkilometer: {df_silver.count():,} rows")
 
@@ -103,9 +103,9 @@ print(f"silver.runsplitkilometer: {df_silver.count():,} rows")
 
 # COMMAND ----------
 
-df_new = spark.table(f"{CATALOG}.bronze.activities").drop("ingested_at")
+df_new = spark.table("bronze.activities")
 
-target_table = f"{CATALOG}.silver.activities"
+target_table = "silver.activities"
 if spark.catalog.tableExists(target_table):
     silver = DeltaTable.forName(spark, target_table)
     silver.alias("t").merge(
@@ -126,10 +126,11 @@ else:
 
 # COMMAND ----------
 
-df_new = spark.table(f"{CATALOG}.bronze.athlete") \
-    .drop("id", "ingested_at")
+df_new = spark.table("bronze.athlete")
+if "id" in df_new.columns:
+    df_new = df_new.drop("id")
 
-target_table = f"{CATALOG}.silver.athlete"
+target_table = "silver.athlete"
 if spark.catalog.tableExists(target_table):
     silver = DeltaTable.forName(spark, target_table)
     silver.alias("t").merge(
@@ -151,5 +152,5 @@ else:
 # COMMAND ----------
 
 for table in ["runstream", "runbest", "runsegment", "runsplitkilometer", "activities", "athlete"]:
-    count = spark.table(f"{CATALOG}.silver.{table}").count()
+    count = spark.table(f"silver.{table}").count()
     print(f"  silver.{table}: {count:,} rows")
