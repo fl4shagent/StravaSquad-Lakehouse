@@ -82,6 +82,18 @@ all_streams = []
 all_segments = []
 all_best_efforts = []
 
+# Load existing activity IDs from bronze to skip duplicates
+existing_activity_ids = set()
+try:
+    existing_activity_ids = set(
+        spark.table("bronze.runstream")
+        .select("activity_id").distinct()
+        .toPandas()["activity_id"].astype(str)
+    )
+    print(f"Found {len(existing_activity_ids):,} existing activity IDs in bronze — will skip these")
+except Exception:
+    print("No existing bronze.runstream table — all activities are new")
+
 for aid, meta in tokens.items():
     athlete_name = meta.get("name", str(aid))
     print(f"\n=== {athlete_name} ({aid}) ===")
@@ -105,6 +117,11 @@ for aid, meta in tokens.items():
         for a in acts:
             act_id = a["id"]
             sport = a.get("sport_type", "unknown").lower()
+
+            # Skip if already in bronze
+            if str(act_id) in existing_activity_ids:
+                print(f"  skip {act_id} (already in bronze)")
+                continue
 
             # Fetch streams
             st_res = requests.get(
@@ -168,6 +185,17 @@ print(f"\nTotal: {len(all_streams)} activities with streams")
 
 # COMMAND ----------
 
+# Load existing activity IDs from bronze.activities
+existing_act_ids = set()
+try:
+    existing_act_ids = set(
+        spark.table("bronze.activities")
+        .select("activity_id").distinct()
+        .toPandas()["activity_id"].astype(str)
+    )
+except Exception:
+    pass
+
 all_activities = []
 for aid, meta in tokens.items():
     athlete_id = int(aid)
@@ -187,6 +215,8 @@ for aid, meta in tokens.items():
         if not isinstance(data, list) or not data:
             break
         for a in data:
+            if str(a.get("id")) in existing_act_ids:
+                continue
             dist_m = a.get("distance", 0) or 0
             elapsed = a.get("elapsed_time", 0) or 0
             all_activities.append({
@@ -204,7 +234,7 @@ for aid, meta in tokens.items():
             })
         page += 1
 
-print(f"Fetched {len(all_activities)} activity summaries")
+print(f"Fetched {len(all_activities)} NEW activity summaries (skipped {len(existing_act_ids)} existing)")
 
 # COMMAND ----------
 
